@@ -123,6 +123,16 @@
               />
             </svg>
           </.connected_account>
+
+          <%= if FrontmanServer.Accounts.OIDC.configured?() do %>
+            <.connected_account
+              provider="oidc"
+              label={FrontmanServer.Accounts.OIDC.provider_name()}
+              identities={@identities}
+            >
+              <span class="font-semibold">OIDC</span>
+            </.connected_account>
+          <% end %>
         </div>
       </div>
     </div>

@@ -182,6 +182,7 @@ clean: ## Clean ReScript build artifacts
 # ============================================================================
 ## E2E_START
 .PHONY: e2e e2e-nextjs e2e-astro e2e-vite e2e-vue-vite
+.PHONY: e2e-oidc e2e-oidc-install-browser oidc-fork-contract
 
 e2e: ## Run all e2e tests (loads secrets from test/e2e/.env)
 	@printf "$(YELLOW)Running all e2e tests...$(RESET)\n"
@@ -202,6 +203,57 @@ e2e-vite: ## Run Vite e2e test
 e2e-vue-vite: ## Run Vue + Vite e2e test
 	@printf "$(YELLOW)Running Vue + Vite e2e test...$(RESET)\n"
 	$(call run_e2e,tests/vue-vite.test.ts)
+
+e2e-oidc: ## Run the local OIDC browser test
+	@printf "$(YELLOW)Running OIDC e2e test...$(RESET)\n"
+	cd test/e2e && node oidc/run.mjs
+
+e2e-oidc-install-browser: ## Install Chromium and system dependencies for OIDC e2e
+	cd test/e2e && npx playwright install chromium --with-deps
+
+oidc-fork-contract: ## Verify OIDC fork files and commands
+	@test -f apps/frontman_server/lib/frontman_server/accounts/oidc.ex
+	@test -f apps/frontman_server/lib/frontman_server/oidc_login.ex
+	@test -f apps/frontman_server/lib/frontman_server_web/controllers/oidc_controller.ex
+	@test -f test/e2e/oidc/run.mjs
+	@$(MAKE) -n e2e-oidc | grep -Fq 'node oidc/run.mjs'
+	@command -v mix >/dev/null
+	@command -v node >/dev/null
+	@command -v yarn >/dev/null
+	@command -v openssl >/dev/null
+	@test -f .github/workflows/docker-publish.yml
+	@sed -n '/^on:$$/,/^[^[:space:]]/p' .github/workflows/docker-publish.yml | rg -q '^  pull_request:$$'
+	@sed -n '/^on:$$/,/^[^[:space:]]/p' .github/workflows/docker-publish.yml | rg -q '^  workflow_dispatch:$$'
+	@sed -n '/^  pr-build:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | rg -Fxq "    if: github.event_name == 'pull_request'"
+	@sed -n '/^  pr-build:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build pull request image$$/,/^      - name: /p' | rg -q '^[[:space:]]+uses: docker/build-push-action@'
+	@sed -n '/^  pr-build:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build pull request image$$/,/^      - name: /p' | rg -Fxq '          platforms: linux/amd64'
+	@sed -n '/^  pr-build:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build pull request image$$/,/^      - name: /p' | rg -Fxq '          push: false'
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | rg -Fxq "    if: github.event_name == 'workflow_dispatch'"
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | rg -Fxq '      group: oidc-docker-publish'
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Checkout release$$/,/^      - name: /p' | rg -Fxq '          ref: refs/tags/$${{ inputs.tag }}'
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Select image tags$$/,/^      - name: /p' | rg -Fxq '          if [ "$$RELEASE_TAG" = "$$latest" ]; then'
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -q '^[[:space:]]+uses: docker/build-push-action@'
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -Fxq '          platforms: linux/amd64,linux/arm64'
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -Fxq '          push: true'
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -Fxq '            ghcr.io/lkshrk/frontman-oidc:$${{ inputs.tag }}'
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -Fxq "            \$${{ steps.release.outputs.latest == 'true' && 'ghcr.io/lkshrk/frontman-oidc:latest' || '' }}"
+	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | rg -Fxq '          password: $${{ secrets.GITHUB_TOKEN }}'
+	@! rg -Pq 'secrets\.(?!GITHUB_TOKEN\b)' .github/workflows/docker-publish.yml
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fxq '          UPSTREAM_TAG: $${{ needs.verify.outputs.tag }}'
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fxq "          RETRY_RELEASE: \$${{ github.event_name == 'workflow_dispatch' }}"
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fxq '          if [[ ! "$$UPSTREAM_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$$ ]]; then'
+	@! sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q 'UPSTREAM_TAG='
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+gh release create "\$$UPSTREAM_TAG"'
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+--verify-tag'
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+gh release edit "\$$UPSTREAM_TAG"'
+	@test "$$(sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fc '[ "$$FORK_TAG_COMMIT" = "$$UPSTREAM_TAG_COMMIT" ]')" -eq 2
+	@test "$$(sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fc 'if [ "$$RETRY_RELEASE" = "true" ]; then')" -eq 2
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fxq '          trap publication_error ERR'
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+--repo "\$$GITHUB_REPOSITORY"'
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+--title "\$$UPSTREAM_TAG"'
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+gh workflow run docker-publish\.yml'
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+--ref "\$$UPSTREAM_TAG"'
+	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+-f "tag=\$$UPSTREAM_TAG"'
 
 ## E2E_END
 

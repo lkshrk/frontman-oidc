@@ -11,7 +11,7 @@ defmodule FrontmanServer.Accounts do
 
   use Boundary,
     deps: [FrontmanServer, FrontmanServer.Organizations],
-    exports: [Scope, User, WorkOS.AuthError]
+    exports: [OIDC, Scope, User, WorkOS.AuthError]
 
   alias FrontmanServer.Repo
 

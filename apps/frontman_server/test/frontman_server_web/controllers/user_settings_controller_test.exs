@@ -22,10 +22,14 @@ defmodule FrontmanServerWeb.UserSettingsControllerTest do
     @tag token_authenticated_at: DateTime.add(DateTime.utc_now(:second), -11, :minute)
     test "redirects if user is not in sudo mode", %{conn: conn} do
       conn = get(conn, ~p"/users/settings")
-      assert redirected_to(conn) == ~p"/users/log-in"
+      login_path = "/users/log-in?return_to=%2Fusers%2Fsettings"
+      assert redirected_to(conn) == login_path
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
                "You must re-authenticate to access this page."
+
+      conn = conn |> recycle() |> get(login_path)
+      assert html_response(conn, 200) =~ "You must re-authenticate to access this page."
     end
   end
 

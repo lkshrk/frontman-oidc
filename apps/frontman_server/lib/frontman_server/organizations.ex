@@ -26,6 +26,8 @@ defmodule FrontmanServer.Organizations do
     deps: [FrontmanServer],
     exports: [Organization]
 
+  alias Ecto.Multi
+  alias FrontmanServer.Accounts.{Scope, User}
   alias FrontmanServer.Organizations.{Membership, Organization}
   alias FrontmanServer.Repo
 
@@ -257,6 +259,62 @@ defmodule FrontmanServer.Organizations do
   # Membership Commands
   # ==============================================================================
 
+  @spec sync_oidc_memberships(Scope.t(), [String.t()]) ::
+          {:ok, %{created: non_neg_integer(), removed: non_neg_integer()}} | {:error, term()}
+  def sync_oidc_memberships(%Scope{} = scope, organization_slugs)
+      when is_list(organization_slugs) do
+    case scope |> sync_oidc_memberships_multi(organization_slugs) |> Repo.transaction() do
+      {:ok, %{oidc_memberships: result}} -> {:ok, result}
+      {:error, :oidc_memberships, reason, _changes} -> {:error, reason}
+    end
+  end
+
+  @spec sync_oidc_memberships_multi(Scope.t(), [String.t()]) :: Multi.t()
+  def sync_oidc_memberships_multi(
+        %Scope{user: %User{id: user_id}},
+        organization_slugs
+      )
+      when is_list(organization_slugs) do
+    organization_slugs = Enum.uniq(organization_slugs)
+
+    Multi.run(Multi.new(), :oidc_memberships, fn repo, _changes ->
+      User
+      |> User.locked_for_update()
+      |> repo.get!(user_id)
+
+      organizations =
+        Organization
+        |> Organization.with_slugs(organization_slugs)
+        |> repo.all()
+
+      organization_ids = Enum.map(organizations, & &1.id)
+
+      existing_organization_ids =
+        Membership
+        |> Membership.for_user(user_id)
+        |> repo.all()
+        |> MapSet.new(& &1.organization_id)
+
+      membership_rows =
+        organizations
+        |> Enum.reject(&MapSet.member?(existing_organization_ids, &1.id))
+        |> oidc_membership_rows(user_id)
+
+      {created, _} =
+        repo.insert_all(Membership, membership_rows,
+          on_conflict: :nothing,
+          conflict_target: [:user_id, :organization_id]
+        )
+
+      {removed, _} =
+        user_id
+        |> Membership.stale_oidc_memberships_for_user(organization_ids)
+        |> repo.delete_all()
+
+      {:ok, %{created: created, removed: removed}}
+    end)
+  end
+
   @doc """
   Adds a user to the organization in scope with the given role.
 
@@ -340,6 +398,21 @@ defmodule FrontmanServer.Organizations do
   end
 
   defp scope_user_id(%{user: %{id: user_id}}), do: user_id
+
+  defp oidc_membership_rows(organizations, user_id) do
+    timestamp = DateTime.utc_now(:second)
+
+    Enum.map(organizations, fn organization ->
+      %{
+        user_id: user_id,
+        organization_id: organization.id,
+        role: :member,
+        provisioner: :oidc,
+        inserted_at: timestamp,
+        updated_at: timestamp
+      }
+    end)
+  end
 
   defp authorize_owner(scope) do
     if owner?(scope), do: :ok, else: {:error, :unauthorized}

@@ -71,10 +71,21 @@ if ! op account get &>/dev/null; then
   printf "${YELLOW}Error: 1Password CLI is not signed in. Run 'op signin' first.${RESET}\n"
   exit 1
 fi
+umask 077
+SECRETS_TARGET="$WT_DIR/.env.secrets.resolved"
+SECRETS_TMP="$(mktemp "$WT_DIR/.env.secrets.resolved.XXXXXX")"
+chmod 0600 "$SECRETS_TMP"
+trap 'rm -f "$SECRETS_TMP"' EXIT
 op run --no-masking --env-file=apps/frontman_server/envs/.dev.secrets.env -- env \
   | grep -v '^_=' | grep -v '^SHLVL=' | grep -v '^PWD=' | grep -v '^OLDPWD=' \
-  | grep -E '^(WORKOS_|OPENROUTER_|SENTRY_|SECRET_|DATABASE_|PHX_|FRONTMAN_)' \
-  > "$WT_DIR/.env.secrets.resolved"
+  | grep -E '^(WORKOS_|OIDC_|OPENROUTER_|SENTRY_|SECRET_|DATABASE_|PHX_|FRONTMAN_)' \
+  > "$SECRETS_TMP"
+if [ -L "$SECRETS_TARGET" ]; then
+  printf "${YELLOW}Error: Refusing to replace secret-file symlink: %s${RESET}\n" "$SECRETS_TARGET"
+  exit 1
+fi
+mv "$SECRETS_TMP" "$SECRETS_TARGET"
+trap - EXIT
 printf "${GREEN}Secrets resolved.${RESET}\n"
 echo ""
 

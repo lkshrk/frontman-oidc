@@ -4,7 +4,7 @@
 # Run 'make help' to see available commands
 
 .DEFAULT_GOAL := help
-.PHONY: help install test test-record test-coverage format lint dev dev-container build clean check setup db-setup db-reset db-migrate db-seed assets-setup assets-build assets-deploy precommit credo debug-task
+.PHONY: help install test test-record test-coverage format lint dev dev-container build clean check setup db-setup db-reset db-migrate db-seed assets-setup assets-build assets-build-app assets-deploy precommit credo debug-task
 
 SHELL := /bin/bash
 
@@ -44,6 +44,11 @@ assets-build: ## Build assets for development
 	mix tailwind frontman_server
 	mix esbuild frontman_server
 	mix esbuild browser_test
+
+assets-build-app: ## Build Frontman server assets without the browser test bundle
+	mix compile
+	mix tailwind frontman_server
+	mix esbuild frontman_server
 
 assets-deploy: ## Build and minify assets for production
 	mix tailwind frontman_server --minify

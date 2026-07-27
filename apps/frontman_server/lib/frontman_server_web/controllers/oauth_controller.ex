@@ -13,7 +13,7 @@ defmodule FrontmanServerWeb.OAuthController do
 
   import FrontmanServerWeb.UserAuth, only: [require_sudo_mode: 2]
 
-  plug(:require_sudo_mode when action in [:link_request, :link_callback, :unlink])
+  plug(:require_sudo_mode when action in [:link_request, :unlink])
 
   def request(conn, %{"provider" => provider}) do
     redirect_uri = url(~p"/auth/callback")

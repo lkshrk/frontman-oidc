@@ -60,6 +60,7 @@ defmodule FrontmanServerWeb.UserAuthTest do
     test "redirects to the configured path", %{conn: conn, user: user} do
       conn = conn |> put_session(:user_return_to, "/hello") |> UserAuth.log_in_user(user)
       assert redirected_to(conn) == "/hello"
+      refute get_session(conn, :user_return_to)
     end
 
     test "redirects to allowed external return_to URLs", %{conn: conn, user: user} do
@@ -313,10 +314,13 @@ defmodule FrontmanServerWeb.UserAuthTest do
         |> assign(:current_scope, Scope.for_user(user))
         |> UserAuth.require_sudo_mode([])
 
-      assert redirected_to(conn) == ~p"/users/log-in"
+      assert redirected_to(conn) == "/users/log-in?return_to=%2F"
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
                "You must re-authenticate to access this page."
+
+      refute get_session(conn, :user_token)
+      refute get_session(conn, :user_return_to)
     end
   end
 

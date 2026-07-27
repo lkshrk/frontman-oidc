@@ -44,6 +44,7 @@ defmodule FrontmanServerWeb.UserAuth do
   """
   def log_in_user(conn, user, params \\ %{}) do
     user_return_to = get_session(conn, :user_return_to)
+    conn = delete_session(conn, :user_return_to)
 
     conn
     |> create_or_extend_session(user, params)
@@ -105,7 +106,7 @@ defmodule FrontmanServerWeb.UserAuth do
   Accepts an optional `return_to` URL that is forwarded to the login page
   so the user is redirected back after re-authenticating.
   """
-  def log_out_user(conn, return_to \\ nil) do
+  def log_out_user(conn, return_to \\ nil, flash \\ nil) do
     user_token = get_session(conn, :user_token)
     user_token && Accounts.delete_user_session_token(user_token)
 
@@ -121,9 +122,13 @@ defmodule FrontmanServerWeb.UserAuth do
 
     conn
     |> renew_session(nil)
+    |> put_logout_flash(flash)
     |> delete_resp_cookie(@remember_me_cookie)
     |> redirect(to: redirect_url)
   end
+
+  defp put_logout_flash(conn, nil), do: conn
+  defp put_logout_flash(conn, {kind, message}), do: put_flash(conn, kind, message)
 
   @doc """
   Authenticates the user by looking into the session and remember me token.
@@ -338,10 +343,14 @@ defmodule FrontmanServerWeb.UserAuth do
     if Accounts.sudo_mode?(conn.assigns.current_scope.user, -10) do
       conn
     else
+      conn = maybe_store_return_to(conn)
+      return_to = get_session(conn, :user_return_to)
+
       conn
-      |> put_flash(:error, "You must re-authenticate to access this page.")
-      |> maybe_store_return_to()
-      |> redirect(to: ~p"/users/log-in")
+      |> log_out_user(
+        return_to,
+        {:error, "You must re-authenticate to access this page."}
+      )
       |> halt()
     end
   end

@@ -9,7 +9,7 @@ import type { Page } from "playwright";
 const E2E_EMAIL = "e2e@frontman.local";
 const E2E_PASSWORD = "e2epassword123!";
 
-const PHOENIX_ORIGIN = "https://localhost:4002";
+const PHOENIX_ORIGIN = process.env.FRONTMAN_E2E_URL ?? "https://localhost:4002";
 
 /**
  * Log in the e2e test user via the dev email/password form.
@@ -57,12 +57,16 @@ async function loginOnce(
   // the same browser context), Phoenix redirects away from /users/log-in
   // immediately.  In that case the login form never appears — skip it.
   if (!page.url().includes("/users/log-in")) {
-    console.log(`  [e2e] Already authenticated — skipped login form (URL: ${page.url()})`);
+    console.log(
+      `  [e2e] Already authenticated — skipped login form (URL: ${page.url()})`,
+    );
     return;
   }
 
   // Fill the dev login form
-  await page.locator("#login-form").waitFor({ state: "visible", timeout: 30_000 });
+  await page
+    .locator("#login-form")
+    .waitFor({ state: "visible", timeout: 30_000 });
   await page.fill('#login-form input[type="email"]', E2E_EMAIL);
   await page.fill('#login-form input[type="password"]', E2E_PASSWORD);
   await page.click("#login-submit");

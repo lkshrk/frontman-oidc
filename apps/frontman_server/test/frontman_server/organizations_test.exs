@@ -1,7 +1,10 @@
 defmodule FrontmanServer.OrganizationsTest do
   use FrontmanServer.DataCase
 
+  alias Ecto.Adapters.SQL.Sandbox
+  alias FrontmanServer.Accounts.User
   alias FrontmanServer.Organizations
+  alias FrontmanServer.Organizations.Membership
 
   import FrontmanServer.Test.Fixtures.Accounts
 
@@ -263,6 +266,148 @@ defmodule FrontmanServer.OrganizationsTest do
     end
   end
 
+  describe "sync_oidc_memberships/2" do
+    test "adds exact organization slugs as idempotent OIDC members" do
+      user_scope = user_scope_fixture()
+      owner_scope = user_scope_fixture()
+
+      {:ok, organization} =
+        Organizations.create_organization(owner_scope, %{name: "Managed Org", slug: "managed-org"})
+
+      assert {:ok, %{created: 1, removed: 0}} =
+               Organizations.sync_oidc_memberships(user_scope, [
+                 "managed-org",
+                 "unknown-org",
+                 "managed-org"
+               ])
+
+      membership =
+        Organizations.get_membership(
+          user_scope_fixture(user_scope.user, organization),
+          user_scope.user
+        )
+
+      assert membership.role == :member
+      assert membership.provisioner == :oidc
+
+      assert {:ok, %{created: 0, removed: 0}} =
+               Organizations.sync_oidc_memberships(user_scope, ["managed-org", "managed-org"])
+    end
+
+    test "removes stale OIDC members while preserving manual members and owners" do
+      user_scope = user_scope_fixture()
+      owner_scope = user_scope_fixture()
+
+      {:ok, oidc_organization} =
+        Organizations.create_organization(owner_scope, %{name: "OIDC Org", slug: "oidc-org"})
+
+      {:ok, manual_organization} =
+        Organizations.create_organization(owner_scope, %{name: "Manual Org", slug: "manual-org"})
+
+      owner_organization_scope = user_scope_fixture(owner_scope.user, manual_organization)
+
+      {:ok, manual_membership} =
+        Organizations.add_member(owner_organization_scope, user_scope.user)
+
+      {:ok, owned_organization} =
+        Organizations.create_organization(user_scope, %{name: "Owned Org", slug: "owned-org"})
+
+      assert {:ok, %{created: 1, removed: 0}} =
+               Organizations.sync_oidc_memberships(user_scope, ["oidc-org"])
+
+      assert {:ok, %{created: 0, removed: 1}} =
+               Organizations.sync_oidc_memberships(user_scope, [])
+
+      assert Organizations.get_membership(
+               user_scope_fixture(user_scope.user, oidc_organization),
+               user_scope.user
+             ) == nil
+
+      assert Organizations.get_membership(
+               user_scope_fixture(user_scope.user, manual_organization),
+               user_scope.user
+             ).provisioner == :manual
+
+      assert Organizations.get_membership(
+               user_scope_fixture(user_scope.user, owned_organization),
+               user_scope.user
+             ).role == :owner
+
+      assert manual_membership.provisioner == :manual
+    end
+
+    test "retains an OIDC membership promoted to owner after its claim is removed" do
+      user_scope = user_scope_fixture()
+      owner_scope = user_scope_fixture()
+
+      {:ok, organization} =
+        Organizations.create_organization(owner_scope, %{
+          name: "Promoted Org",
+          slug: "promoted-org"
+        })
+
+      owner_organization_scope = user_scope_fixture(owner_scope.user, organization)
+
+      assert {:ok, %{created: 1, removed: 0}} =
+               Organizations.sync_oidc_memberships(user_scope, ["promoted-org"])
+
+      assert {:ok, _membership} =
+               Organizations.update_member_role(owner_organization_scope, user_scope.user, :owner)
+
+      assert {:ok, %{created: 0, removed: 0}} =
+               Organizations.sync_oidc_memberships(user_scope, [])
+
+      membership =
+        Organizations.get_membership(
+          user_scope_fixture(user_scope.user, organization),
+          user_scope.user
+        )
+
+      assert membership.role == :owner
+      assert membership.provisioner == :oidc
+    end
+
+    test "serializes concurrent synchronization for one user" do
+      Sandbox.unboxed_run(Repo, fn ->
+        user_scope = user_scope_fixture()
+        owner_scope = user_scope_fixture()
+
+        {:ok, first_organization} =
+          Organizations.create_organization(owner_scope, %{name: "First Org", slug: "first-org"})
+
+        {:ok, second_organization} =
+          Organizations.create_organization(owner_scope, %{name: "Second Org", slug: "second-org"})
+
+        try do
+          tasks = lock_user_and_start_synchronizations(user_scope)
+
+          results = Enum.map(tasks, &Task.await(&1, 1_000))
+          assert Enum.all?(results, &match?({:ok, _}, &1))
+
+          memberships =
+            user_scope.user.id
+            |> Membership.for_user()
+            |> Repo.all()
+
+          assert Enum.count(
+                   memberships,
+                   &match?(%Membership{provisioner: :oidc, role: :member}, &1)
+                 ) ==
+                   1
+
+          assert Enum.any?(memberships, fn membership ->
+                   membership.organization_id in [first_organization.id, second_organization.id]
+                 end)
+        after
+          Repo.delete!(first_organization)
+          Repo.delete!(second_organization)
+          Repo.delete!(user_scope.user)
+          Repo.delete!(owner_scope.user)
+        end
+      end)
+    end
+  end
+
   describe "role checks" do
     test "owner?/1 returns true only for owners" do
       owner_scope = user_scope_fixture()
@@ -296,6 +441,51 @@ defmodule FrontmanServer.OrganizationsTest do
       assert Organizations.member?(owner_org_scope)
       assert Organizations.member?(member_org_scope)
       refute Organizations.member?(outsider_org_scope)
+    end
+  end
+
+  defp lock_user_and_start_synchronizations(user_scope) do
+    parent = self()
+
+    {:ok, tasks} =
+      Repo.transaction(fn ->
+        User
+        |> User.locked_for_update()
+        |> Repo.get!(user_scope.user.id)
+
+        tasks =
+          Enum.map(
+            [["first-org"], ["second-org"]],
+            &start_synchronization(parent, user_scope, &1)
+          )
+
+        assert_receive {:ready, _task_pid}, 1_000
+        assert_receive {:ready, _task_pid}, 1_000
+        Enum.each(tasks, &send(&1.pid, :sync))
+        refute_receive {:finished, _task_pid}, 100
+        tasks
+      end)
+
+    tasks
+  end
+
+  defp start_synchronization(parent, user_scope, organization_slugs) do
+    Task.async(fn ->
+      Sandbox.unboxed_run(Repo, fn ->
+        send(parent, {:ready, self()})
+        await_synchronization(parent, user_scope, organization_slugs)
+      end)
+    end)
+  end
+
+  defp await_synchronization(parent, user_scope, organization_slugs) do
+    receive do
+      :sync ->
+        result = Organizations.sync_oidc_memberships(user_scope, organization_slugs)
+        send(parent, {:finished, self()})
+        result
+    after
+      1_000 -> raise "timed out waiting to synchronize memberships"
     end
   end
 end

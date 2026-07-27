@@ -2,7 +2,7 @@
  * Vitest global setup — runs once before all e2e tests.
  *
  * 1. Creates + migrates the e2e database
- * 2. Seeds the test user + ChatGPT OAuth token
+ * 2. Seeds the test user + provider credentials
  * 3. Starts the Phoenix server (MIX_ENV=e2e)
  * 4. Starts the client Vite dev server (for serving the Frontman UI JS)
  * 5. Waits for both to be ready
@@ -99,13 +99,22 @@ export async function setup() {
   execSync("mix ecto.create --quiet", { cwd: SERVER_DIR, env: E2E_ENV, stdio: "pipe" });
   execSync("mix ecto.migrate --quiet", { cwd: SERVER_DIR, env: E2E_ENV, stdio: "pipe" });
 
-  // ── 2. Seed test user + ChatGPT token ──────────────────────────────────────
+  // ── 2. Seed test user + provider credentials ───────────────────────────────
   console.log("  [e2e] Seeding test user…");
   execSync("mix run priv/repo/e2e_seeds.exs", {
     cwd: SERVER_DIR,
     env: E2E_ENV,
     stdio: "inherit",
   });
+
+  if (E2E_ENV.ANTHROPIC_AUTH_TOKEN && E2E_ENV.ANTHROPIC_BASE_URL) {
+    console.log("  [e2e] Verifying Anthropic API route…");
+    execSync("mix run ../../test/e2e/anthropic_api_contract.exs", {
+      cwd: SERVER_DIR,
+      env: E2E_ENV,
+      stdio: "inherit",
+    });
+  }
 
   // ── 3. Start Phoenix server ────────────────────────────────────────────────
   console.log("  [e2e] Starting Phoenix server on port", PHOENIX_PORT, "…");

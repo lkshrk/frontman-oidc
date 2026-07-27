@@ -20,8 +20,9 @@ envs/
 .mcp.json
 
 # Test/dev only
-test/
-!test/sites/blog-starter/package.json
+test/**
+!test/**/
+!test/**/package.json
 *.test.res.mjs
 
 # OS files

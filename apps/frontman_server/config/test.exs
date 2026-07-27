@@ -40,6 +40,8 @@ config :frontman_server, FrontmanServer.Workers.SendWelcomeEmail, enabled: true
 config :frontman_server, FrontmanServer.Workers.SyncResendContact, enabled: true
 config :frontman_server, FrontmanServer.Workers.NotifyDiscordNewUser, enabled: true
 
+config :frontman_server, FrontmanServer.Accounts.OIDC, client: FrontmanServer.Test.OIDCClient
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 
