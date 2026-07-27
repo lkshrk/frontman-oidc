@@ -387,19 +387,16 @@ GitHub Actions workflows:
 | Workflow | Trigger | Function |
 |----------|---------|----------|
 | ci.yml | PR/push | ReScript build, 7 test jobs, lint (Biome + Credo), protocol check, dead code detection |
-| deploy.yml | push to main | Server: rsync to Hetzner → native build → blue-green deploy. Client: Vite bundle → Cloudflare Pages |
-| deploy-marketing.yml | changes to marketing/astro | Astro build → Cloudflare Pages |
-| e2e.yml | PR/push | Playwright tests across 4 framework fixtures |
-| changelog-check.yml | PR | Enforces changeset presence (bypass: `skip-changelog` label) |
-| release-pr.yml | manual (`make release`) | Runs `yarn changeset version`, creates release branch + PR |
-| release-tag.yml | release PR merge | Creates git tag + GitHub Release |
+| oidc-e2e.yml | PR/manual | Authentik login and group mapping |
+| anthropic-api-e2e.yml | PR/manual | Live Anthropic-compatible API contract |
+| docker-publish.yml | PR/manual | Verifies the image and publishes versioned amd64/arm64 images |
+| oidc-upstream-sync.yml | daily/manual | Verifies the latest stable upstream tag, creates the GitHub Release, and dispatches Docker publishing |
+| astro-compat.yml | PR/schedule | Astro compatibility |
 
 Coverage gates: 70% for JS packages, 75% for Elixir server.
 
-### Production
-
-- Server: Hetzner bare metal, Ubuntu 24.04, blue-green deployment via `infra/production/deploy.sh`
-- Client + Marketing: Cloudflare Pages (static)
+This fork has no application deployment workflow. It publishes only the
+same-version GitHub Release and GHCR image.
 
 ---
 
@@ -408,9 +405,7 @@ Coverage gates: 70% for JS packages, 75% for Elixir server.
 - Client libraries & framework integrations (`libs/`) — Apache License 2.0
 - Server (`apps/frontman_server/`) — GNU Affero General Public License v3
 
-### Release Process
+### Image Publishing
 
-1. `yarn changeset` creates `.changeset/*.md` fragment
-2. Fragments accumulate on main
-3. `make release` triggers workflow → `yarn changeset version` → release PR
-4. PR merge → auto git tag + GitHub Release
+The daily sync creates a git tag matching the latest stable upstream source
+release and publishes `ghcr.io/lkshrk/frontman-oidc:<version>` plus `latest`.

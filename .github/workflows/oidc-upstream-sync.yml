@@ -8,7 +8,7 @@ on:
         required: false
         type: string
       dry_run:
-        description: "Merge and verify without publishing or reporting"
+        description: "Merge and verify without publishing"
         required: false
         default: false
         type: boolean
@@ -30,14 +30,9 @@ jobs:
     permissions:
       contents: read
     outputs:
-      artifact_id: ${{ steps.upload.outputs.artifact-id }}
-      artifact_uploaded: ${{ steps.upload.outcome == 'success' }}
-      bundle: ${{ steps.prepare.outputs.bundle }}
       commit: ${{ steps.prepare.outputs.commit }}
       dry_run: ${{ steps.prepare.outputs.dry_run }}
       exact_tag: ${{ steps.prepare.outputs.exact_tag }}
-      exit_status: ${{ steps.checks.outcome == 'success' && '0' || '1' }}
-      phase: validation
       skip: ${{ steps.prepare.outputs.skip }}
       tag: ${{ steps.prepare.outputs.tag }}
       tag_commit: ${{ steps.prepare.outputs.tag_commit }}
@@ -108,9 +103,7 @@ jobs:
 
           if [ -z "$UPSTREAM_TAG" ]; then
             echo "No stable upstream release tag found."
-            {
-              echo "skip=true"
-            } >> "$GITHUB_OUTPUT"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -139,11 +132,14 @@ jobs:
           fi
 
           if git show-ref --verify --quiet "refs/tags/${UPSTREAM_TAG}"; then
+            if [ "$(git cat-file -t "refs/tags/${UPSTREAM_TAG}")" != "tag" ]; then
+              echo "Fork tag ${UPSTREAM_TAG} must be annotated."
+              exit 1
+            fi
             FORK_TAG_COMMIT="$(git rev-parse "refs/tags/${UPSTREAM_TAG}^{commit}")"
 
             if [ "$FORK_TAG_COMMIT" = "$TAG_COMMIT" ] ||
-              ! git merge-base --is-ancestor \
-              "$TAG_COMMIT" "$FORK_TAG_COMMIT" ||
+              ! git merge-base --is-ancestor "$TAG_COMMIT" "$FORK_TAG_COMMIT" ||
               ! git merge-base --is-ancestor \
                 "$FORK_TAG_COMMIT" "origin/${TARGET_BRANCH}"; then
               echo "Fork tag ${UPSTREAM_TAG} is inconsistent with upstream or main."
@@ -159,16 +155,7 @@ jobs:
           fi
 
           git switch -C "$SYNC_BRANCH" "origin/${TARGET_BRANCH}"
-
-          set +e
           git merge --no-edit "$UPSTREAM_REF"
-          MERGE_STATUS=$?
-          set -e
-
-          if [ "$MERGE_STATUS" -ne 0 ]; then
-            git merge --abort || true
-            exit "$MERGE_STATUS"
-          fi
 
           COMMIT="$(git rev-parse HEAD)"
           git update-ref "$BUNDLE_REF" "$COMMIT"
@@ -180,9 +167,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload candidate commit
-        if: always() && steps.prepare.outputs.bundle == 'true'
-        id: upload
-        continue-on-error: true
+        if: steps.prepare.outputs.bundle == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: oidc-sync-${{ github.run_id }}
@@ -221,7 +206,6 @@ jobs:
 
       - name: Run required checks
         if: steps.prepare.outputs.skip != 'true'
-        id: checks
         run: |
           set -euo pipefail
 
@@ -236,7 +220,6 @@ jobs:
           }
 
           run_candidate make install
-          run_candidate make oidc-fork-contract
           run_candidate make -C apps/frontman_server install
           run_candidate make -C apps/frontman_server lint
           run_candidate make -C apps/frontman_server build
@@ -244,22 +227,14 @@ jobs:
           run_candidate make e2e-oidc-install-browser
           run_candidate make e2e-oidc
 
-          if ! git diff --quiet || ! git diff --cached --quiet; then
-            exit 1
-          fi
-
-      - name: Require candidate artifact
-        if: >-
-          always() &&
-          steps.prepare.outputs.bundle == 'true' &&
-          steps.upload.outcome != 'success'
-        run: exit 1
+          git diff --quiet
+          git diff --cached --quiet
 
   publish:
-    name: Publish or report verified candidate
+    name: Publish verified candidate
     needs: verify
     if: >-
-      always() &&
+      needs.verify.result == 'success' &&
       needs.verify.outputs.tag != '' &&
       needs.verify.outputs.dry_run != 'true' &&
       (
@@ -270,7 +245,6 @@ jobs:
     permissions:
       actions: write
       contents: write
-      pull-requests: write
 
     steps:
       - name: Checkout fork main
@@ -278,364 +252,129 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ secrets.SYNC_TOKEN || github.token }}
+          token: ${{ github.token }}
 
       - name: Download candidate commit
-        if: needs.verify.outputs.artifact_uploaded == 'true'
-        id: download
-        continue-on-error: true
+        if: needs.verify.outputs.exact_tag != 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          artifact-ids: ${{ needs.verify.outputs.artifact_id }}
+          name: oidc-sync-${{ github.run_id }}
 
-      - name: Publish or report
-        if: always()
+      - name: Publish
         env:
-          ARTIFACT_DOWNLOADED: ${{ steps.download.outcome == 'success' }}
-          ARTIFACT_UPLOADED: ${{ needs.verify.outputs.artifact_uploaded }}
-          BUNDLE_AVAILABLE: ${{ needs.verify.outputs.bundle }}
           CANDIDATE_COMMIT: ${{ needs.verify.outputs.commit }}
           EXACT_TAG: ${{ needs.verify.outputs.exact_tag }}
-          FAILURE_PHASE: ${{ needs.verify.outputs.phase }}
-          FAILURE_STATUS: ${{ needs.verify.outputs.exit_status }}
-          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
-          RETRY_RELEASE: ${{ github.event_name == 'workflow_dispatch' }}
+          GH_TOKEN: ${{ github.token }}
+          RETRY_IMAGE: ${{ github.event_name == 'workflow_dispatch' }}
           UPSTREAM_TAG: ${{ needs.verify.outputs.tag }}
           UPSTREAM_TAG_COMMIT: ${{ needs.verify.outputs.tag_commit }}
           UPSTREAM_TAG_OBJECT: ${{ needs.verify.outputs.tag_object }}
-          VERIFY_RESULT: ${{ needs.verify.result }}
         run: |
-          set -Eeuo pipefail
+          set -euo pipefail
 
           TARGET_BRANCH="main"
-          REPORT_BRANCH="sync-report/${UPSTREAM_TAG}"
-          REPORT_PATH=".github/oidc-upstream-sync-failure.md"
 
-          if [[ ! "$UPSTREAM_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Invalid verified tag."
+          if [[ ! "$UPSTREAM_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] ||
+            [[ ! "$UPSTREAM_TAG_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
+            [[ ! "$UPSTREAM_TAG_OBJECT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Invalid verified release metadata."
             exit 1
           fi
 
-          failure_pr_number() {
-            gh pr list \
-              --repo "$GITHUB_REPOSITORY" \
-              --base "$TARGET_BRANCH" \
-              --head "$REPORT_BRANCH" \
-              --state open \
-              --json number \
-              --jq '.[0].number'
-          }
-
-          close_stale_failure_pr() {
-            local pr_number
-            pr_number="$(failure_pr_number)"
-
-            if [ -n "$pr_number" ]; then
-              gh pr close "$pr_number" \
-                --repo "$GITHUB_REPOSITORY" \
-                --comment \
-                "Upstream ${UPSTREAM_TAG} is synchronized; preserving the failure branch."
-            fi
-          }
-
-          publish_release() {
-            if gh release view "$UPSTREAM_TAG" \
-              --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-              gh release edit "$UPSTREAM_TAG" \
-                --repo "$GITHUB_REPOSITORY" \
-                --title "$UPSTREAM_TAG" \
-                --notes "Frontman ${UPSTREAM_TAG} with OIDC login and group mapping." ||
-                return
-            else
-              gh release create "$UPSTREAM_TAG" \
-                --repo "$GITHUB_REPOSITORY" \
-                --title "$UPSTREAM_TAG" \
-                --verify-tag \
-                --notes "Frontman ${UPSTREAM_TAG} with OIDC login and group mapping." ||
-                return
-            fi
-
+          publish_image() {
             gh workflow run docker-publish.yml \
               --repo "$GITHUB_REPOSITORY" \
               --ref "$UPSTREAM_TAG" \
               -f "tag=$UPSTREAM_TAG"
           }
 
-          publish_release_or_report() {
-            local status
-
-            set +e
-            publish_release
-            status=$?
-            set -e
-
-            if [ "$status" -ne 0 ]; then
-              FAILURE_PHASE="publication"
-              FAILURE_STATUS="1"
-              write_failure_report
-              exit "$status"
-            fi
-          }
-
-          write_failure_report() {
-            local phase="$FAILURE_PHASE"
-            local status="$FAILURE_STATUS"
-            local body
-
-            if [ "$VERIFY_RESULT" != "success" ] && [ "$status" = "0" ]; then
-              status="1"
-            fi
-
-            umask 077
-            body="$(mktemp)"
-            {
-              echo "# Upstream sync ${UPSTREAM_TAG}"
-              echo
-              echo "- Phase: ${phase}"
-              echo "- Exit status: ${status}"
-              echo "- Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-              echo
-              echo "No command output is copied into this report."
-            } > "$body"
-
-            if git ls-remote --exit-code --heads origin \
-              "refs/heads/${REPORT_BRANCH}" >/dev/null 2>&1; then
-              pr_number="$(failure_pr_number)"
-
-              if [ -n "$pr_number" ]; then
-                gh pr edit "$pr_number" \
-                  --repo "$GITHUB_REPOSITORY" \
-                  --title "Sync upstream ${UPSTREAM_TAG} requires attention" \
-                  --body-file "$body"
-              else
-                gh pr create \
-                  --repo "$GITHUB_REPOSITORY" \
-                  --base "$TARGET_BRANCH" \
-                  --head "$REPORT_BRANCH" \
-                  --title "Sync upstream ${UPSTREAM_TAG} requires attention" \
-                  --body-file "$body"
-              fi
-
+          publish_release() {
+            if gh release view "$UPSTREAM_TAG" \
+              --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
               return
             fi
 
-            git switch -C "$REPORT_BRANCH" "origin/${TARGET_BRANCH}"
-            rm -rf -- "$REPORT_PATH"
-            install -m 0600 "$body" "$REPORT_PATH"
-            git add -f -- "$REPORT_PATH"
-            git -c core.hooksPath=/dev/null commit \
-              -m "chore: report failed upstream sync ${UPSTREAM_TAG}"
-            git -c core.hooksPath=/dev/null push origin \
-              "HEAD:refs/heads/${REPORT_BRANCH}"
-            gh pr create \
+            gh release create "$UPSTREAM_TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --base "$TARGET_BRANCH" \
-              --head "$REPORT_BRANCH" \
-              --title "Sync upstream ${UPSTREAM_TAG} requires attention" \
-              --body-file "$body"
+              --verify-tag \
+              --title "$UPSTREAM_TAG" \
+              --generate-notes
           }
 
-          publication_error() {
-            local status=$?
+          validate_fork_tag() {
+            local ref="$1"
+            local fork_tag_commit
+            fork_tag_commit="$(git rev-parse "${ref}^{commit}")"
 
-            trap - ERR
-            FAILURE_PHASE="publication"
-            FAILURE_STATUS="1"
-            write_failure_report || true
-            exit "$status"
+            if [ "$(git cat-file -t "$ref")" != "tag" ] ||
+              [ "$fork_tag_commit" = "$UPSTREAM_TAG_COMMIT" ] ||
+              ! git merge-base --is-ancestor \
+                "$UPSTREAM_TAG_COMMIT" "$fork_tag_commit" ||
+              ! git merge-base --is-ancestor \
+                "$fork_tag_commit" "origin/${TARGET_BRANCH}"; then
+              echo "Invalid fork release tag: ${ref}."
+              exit 1
+            fi
           }
-          trap publication_error ERR
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin "$TARGET_BRANCH" --tags
 
-          case "$ARTIFACT_DOWNLOADED" in
-            true | false) ;;
-            *) echo "Invalid artifact download state."; false ;;
-          esac
-          case "$ARTIFACT_UPLOADED" in
-            true | false) ;;
-            *) echo "Invalid artifact upload state."; false ;;
-          esac
-          case "$BUNDLE_AVAILABLE" in
-            true | false) ;;
-            *) echo "Invalid bundle state."; false ;;
-          esac
-          case "$EXACT_TAG" in
-            true | false) ;;
-            *) echo "Invalid exact-tag state."; false ;;
-          esac
-          case "$FAILURE_PHASE" in
-            validation | publication) ;;
-            *) FAILURE_PHASE="validation" ;;
-          esac
-          case "$FAILURE_STATUS" in
-            0 | 1) ;;
-            *) FAILURE_STATUS="1" ;;
-          esac
-          case "$VERIFY_RESULT" in
-            success | failure | cancelled | skipped) ;;
-            *) VERIFY_RESULT="failure" ;;
-          esac
-          case "$RETRY_RELEASE" in
-            true | false) ;;
-            *) echo "Invalid release retry state."; false ;;
-          esac
-
-          if [ "$BUNDLE_AVAILABLE" = "true" ] &&
-            { [ "$ARTIFACT_UPLOADED" != "true" ] ||
-              [ "$ARTIFACT_DOWNLOADED" != "true" ]; }; then
-            BUNDLE_AVAILABLE="false"
-            FAILURE_STATUS="1"
-            VERIFY_RESULT="failure"
-          fi
-
-          if [[ ! "$UPSTREAM_TAG_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Invalid upstream tag commit."
-            FAILURE_STATUS="1"
-            VERIFY_RESULT="failure"
-            write_failure_report
-            exit 1
-          fi
-          if [[ ! "$UPSTREAM_TAG_OBJECT" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Invalid upstream tag object."
-            FAILURE_STATUS="1"
-            VERIFY_RESULT="failure"
-            write_failure_report
-            exit 1
-          fi
-
-          if [ "$BUNDLE_AVAILABLE" = "true" ]; then
-            if [[ ! "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
-              [ ! -f sync.bundle ]; then
-              echo "Invalid candidate bundle."
-              FAILURE_PHASE="publication"
-              FAILURE_STATUS="1"
-              write_failure_report
-              exit 1
-            fi
-
-            git bundle verify sync.bundle
-            git fetch sync.bundle \
-              "refs/oidc-sync/${UPSTREAM_TAG}:refs/heads/oidc-sync-candidate"
-            git fetch sync.bundle \
-              "refs/upstream-tags/${UPSTREAM_TAG}:refs/oidc-upstream-tags/${UPSTREAM_TAG}"
-
-            IMPORTED_COMMIT="$(git rev-parse oidc-sync-candidate)"
-            IMPORTED_TAG_OBJECT="$(
-              git rev-parse "refs/oidc-upstream-tags/${UPSTREAM_TAG}"
-            )"
-            IMPORTED_TAG_COMMIT="$(
-              git rev-parse "refs/oidc-upstream-tags/${UPSTREAM_TAG}^{commit}"
-            )"
-
-            if [ "$IMPORTED_COMMIT" != "$CANDIDATE_COMMIT" ] ||
-              [ "$IMPORTED_TAG_OBJECT" != "$UPSTREAM_TAG_OBJECT" ] ||
-              [ "$IMPORTED_TAG_COMMIT" != "$UPSTREAM_TAG_COMMIT" ]; then
-              echo "Candidate bundle does not match verified outputs."
-              FAILURE_PHASE="publication"
-              FAILURE_STATUS="1"
-              write_failure_report
-              exit 1
-            fi
-          else
-            CANDIDATE_COMMIT="$(git rev-parse "origin/${TARGET_BRANCH}")"
-          fi
-
           if [ "$EXACT_TAG" = "true" ]; then
-            FORK_TAG_COMMIT="$(
-              git rev-parse "refs/tags/${UPSTREAM_TAG}^{commit}"
-            )"
-
-            if [ "$VERIFY_RESULT" != "success" ] ||
-              [ "$FORK_TAG_COMMIT" = "$UPSTREAM_TAG_COMMIT" ] ||
-              ! git merge-base --is-ancestor \
-                "$UPSTREAM_TAG_COMMIT" "$FORK_TAG_COMMIT" ||
-              ! git merge-base --is-ancestor \
-                "$FORK_TAG_COMMIT" "origin/${TARGET_BRANCH}"; then
-              echo "Exact-tag result failed validation."
-              FAILURE_PHASE="publication"
-              FAILURE_STATUS="1"
-              write_failure_report
-              exit 1
-            fi
-
-            if [ "$RETRY_RELEASE" = "true" ]; then
-              publish_release_or_report
-              close_stale_failure_pr
+            validate_fork_tag "refs/tags/${UPSTREAM_TAG}"
+            publish_release
+            if [ "$RETRY_IMAGE" = "true" ]; then
+              publish_image
             fi
             exit 0
           fi
 
-          if [ "$VERIFY_RESULT" != "success" ]; then
-            write_failure_report
+          if [[ ! "$CANDIDATE_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
+            [ ! -f sync.bundle ]; then
+            echo "Invalid candidate bundle."
             exit 1
           fi
 
-          if [ "$FAILURE_STATUS" != "0" ] ||
-            [ "$BUNDLE_AVAILABLE" != "true" ]; then
-            echo "Successful verification did not produce a candidate bundle."
-            FAILURE_PHASE="publication"
-            FAILURE_STATUS="1"
-            write_failure_report
+          git bundle verify sync.bundle
+          git fetch sync.bundle \
+            "refs/oidc-sync/${UPSTREAM_TAG}:refs/heads/oidc-sync-candidate"
+          git fetch sync.bundle \
+            "refs/upstream-tags/${UPSTREAM_TAG}:refs/oidc-upstream-tags/${UPSTREAM_TAG}"
+
+          IMPORTED_COMMIT="$(git rev-parse oidc-sync-candidate)"
+          IMPORTED_TAG_OBJECT="$(
+            git rev-parse "refs/oidc-upstream-tags/${UPSTREAM_TAG}"
+          )"
+          IMPORTED_TAG_COMMIT="$(
+            git rev-parse "refs/oidc-upstream-tags/${UPSTREAM_TAG}^{commit}"
+          )"
+
+          if [ "$IMPORTED_COMMIT" != "$CANDIDATE_COMMIT" ] ||
+            [ "$IMPORTED_TAG_OBJECT" != "$UPSTREAM_TAG_OBJECT" ] ||
+            [ "$IMPORTED_TAG_COMMIT" != "$UPSTREAM_TAG_COMMIT" ] ||
+            ! git merge-base --is-ancestor \
+              "origin/${TARGET_BRANCH}" "$CANDIDATE_COMMIT"; then
+            echo "Candidate bundle does not match verified outputs."
             exit 1
           fi
 
           ORIGIN_TAG_REF="refs/oidc-origin-tags/${UPSTREAM_TAG}"
           if git fetch --no-tags origin \
             "refs/tags/${UPSTREAM_TAG}:${ORIGIN_TAG_REF}" >/dev/null 2>&1; then
-            FORK_TAG_COMMIT="$(
-              git rev-parse "${ORIGIN_TAG_REF}^{commit}"
-            )"
-
-            if [ "$FORK_TAG_COMMIT" = "$UPSTREAM_TAG_COMMIT" ] ||
-              ! git merge-base --is-ancestor \
-              "$UPSTREAM_TAG_COMMIT" "$FORK_TAG_COMMIT" ||
-              ! git merge-base --is-ancestor \
-                "$FORK_TAG_COMMIT" "origin/${TARGET_BRANCH}"; then
-              FAILURE_PHASE="publication"
-              FAILURE_STATUS="1"
-              write_failure_report
-              exit 1
-            fi
-
-            if [ "$RETRY_RELEASE" = "true" ]; then
-              publish_release_or_report
-              close_stale_failure_pr
+            validate_fork_tag "$ORIGIN_TAG_REF"
+            publish_release
+            if [ "$RETRY_IMAGE" = "true" ]; then
+              publish_image
             fi
             exit 0
           fi
 
-          if ! git merge-base --is-ancestor \
-            "origin/${TARGET_BRANCH}" "$CANDIDATE_COMMIT"; then
-            FAILURE_PHASE="publication"
-            FAILURE_STATUS="1"
-            write_failure_report
-            exit 1
-          fi
-
-          if ! git tag -a "$UPSTREAM_TAG" "$CANDIDATE_COMMIT" \
-            -m "Frontman ${UPSTREAM_TAG} with OIDC"; then
-            FAILURE_PHASE="publication"
-            FAILURE_STATUS="1"
-            write_failure_report
-            exit 1
-          fi
-
-          set +e
+          git tag -a "$UPSTREAM_TAG" "$CANDIDATE_COMMIT" \
+            -m "Frontman ${UPSTREAM_TAG} with OIDC"
           git -c core.hooksPath=/dev/null push --atomic origin \
             "${CANDIDATE_COMMIT}:refs/heads/${TARGET_BRANCH}" \
             "refs/tags/${UPSTREAM_TAG}:refs/tags/${UPSTREAM_TAG}"
-          PUBLISH_STATUS=$?
-          set -e
 
-          if [ "$PUBLISH_STATUS" -ne 0 ]; then
-            FAILURE_PHASE="publication"
-            FAILURE_STATUS="1"
-            write_failure_report
-            exit "$PUBLISH_STATUS"
-          fi
-
-          publish_release_or_report
-          close_stale_failure_pr
+          publish_release
+          publish_image

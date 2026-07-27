@@ -3,7 +3,9 @@ name: OIDC E2E
 on:
   pull_request:
     paths:
+      - ".github/workflows/docker-publish.yml"
       - ".github/workflows/oidc-e2e.yml"
+      - ".github/workflows/oidc-upstream-sync.yml"
       - "Makefile"
       - "apps/frontman_server/**"
       - "test/e2e/oidc/**"
@@ -47,6 +49,18 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      - name: Verify fork image workflow contract
+        run: |
+          grep -Fq 'cron: "0 4 * * *"' .github/workflows/oidc-upstream-sync.yml
+          grep -Fq "git tag -a \"\$UPSTREAM_TAG\"" .github/workflows/oidc-upstream-sync.yml
+          grep -Fq 'push --atomic origin' .github/workflows/oidc-upstream-sync.yml
+          grep -Fq "gh release create \"\$UPSTREAM_TAG\"" .github/workflows/oidc-upstream-sync.yml
+          grep -Fq -- '--verify-tag' .github/workflows/oidc-upstream-sync.yml
+          grep -Fq 'gh workflow run docker-publish.yml' .github/workflows/oidc-upstream-sync.yml
+          grep -Fq 'platforms: linux/amd64,linux/arm64' .github/workflows/docker-publish.yml
+          grep -Fq 'ghcr.io/lkshrk/frontman-oidc:$''{{ inputs.tag }}' .github/workflows/docker-publish.yml
+          grep -Fq 'ghcr.io/lkshrk/frontman-oidc:latest' .github/workflows/docker-publish.yml
 
       - name: Generate encryption key
         run: printf 'CLOAK_KEY=%s\n' "$(openssl rand -base64 32)" >> "$GITHUB_ENV"

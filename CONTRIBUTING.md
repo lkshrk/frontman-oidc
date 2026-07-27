@@ -99,47 +99,13 @@ Use `5`, `6`, or `7` to test another supported major. This installs the packed p
 
 1. Fill out the PR template (description, related issues, testing checklist).
 2. Ensure CI passes — linting, type checking, and tests are run automatically.
-3. Include a changeset if the change is user-facing (`yarn changeset`).
-4. A maintainer will review your PR. We aim to provide initial feedback within a few business days.
+3. A maintainer will review your PR. We aim to provide initial feedback within a few business days.
 
-## Releasing
+## Fork Releases
 
-Frontman uses [changesets](https://github.com/changesets/changesets) for versioning and changelogs.
-
-### 1. Add changesets during development
-
-When making user-facing changes, run `yarn changeset` from the repo root. This creates a markdown fragment in `.changeset/` describing the change and which packages are affected.
-
-### 2. Create a release PR
-
-```bash
-make release
-```
-
-This triggers a GitHub Actions workflow that:
-- Runs `yarn changeset version` to bump package versions and update changelogs
-- Creates a `release/vX.Y.Z` branch and opens a PR
-
-Review the changelog in the PR, then merge when ready.
-
-### 3. Tag and GitHub Release
-
-When the release PR merges to `main`, a git tag and GitHub Release are created automatically.
-
-### 4. Publish to npm
-
-npm publishing is done manually after the release PR merges:
-
-```bash
-git checkout main && git pull
-
-# Publish @frontman-ai/astro
-make publish-astro
-```
-
-This builds the package from scratch (ReScript + tsup bundle) and runs `npm publish`. The version in `package.json` was already bumped by changesets in step 2.
-
-> **Note:** Only `@frontman-ai/astro` has a publish target currently. To add more, create a `publish` target in the package's Makefile and a corresponding `publish-<name>` target in the root Makefile.
+This fork does not deploy applications. Its daily upstream sync creates a
+same-version GitHub Release and publishes a multi-architecture image to
+`ghcr.io/lkshrk/frontman-oidc`.
 
 ## License
 
