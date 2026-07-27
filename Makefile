@@ -182,7 +182,7 @@ clean: ## Clean ReScript build artifacts
 # ============================================================================
 ## E2E_START
 .PHONY: e2e e2e-nextjs e2e-astro e2e-vite e2e-vue-vite
-.PHONY: e2e-oidc e2e-oidc-install-browser oidc-fork-contract
+.PHONY: e2e-oidc e2e-oidc-install-browser
 
 e2e: ## Run all e2e tests (loads secrets from test/e2e/.env)
 	@printf "$(YELLOW)Running all e2e tests...$(RESET)\n"
@@ -210,50 +210,6 @@ e2e-oidc: ## Run the local OIDC browser test
 
 e2e-oidc-install-browser: ## Install Chromium and system dependencies for OIDC e2e
 	cd test/e2e && npx playwright install chromium --with-deps
-
-oidc-fork-contract: ## Verify OIDC fork files and commands
-	@test -f apps/frontman_server/lib/frontman_server/accounts/oidc.ex
-	@test -f apps/frontman_server/lib/frontman_server/oidc_login.ex
-	@test -f apps/frontman_server/lib/frontman_server_web/controllers/oidc_controller.ex
-	@test -f test/e2e/oidc/run.mjs
-	@$(MAKE) -n e2e-oidc | grep -Fq 'node oidc/run.mjs'
-	@command -v mix >/dev/null
-	@command -v node >/dev/null
-	@command -v yarn >/dev/null
-	@command -v openssl >/dev/null
-	@test -f .github/workflows/docker-publish.yml
-	@sed -n '/^on:$$/,/^[^[:space:]]/p' .github/workflows/docker-publish.yml | rg -q '^  pull_request:$$'
-	@sed -n '/^on:$$/,/^[^[:space:]]/p' .github/workflows/docker-publish.yml | rg -q '^  workflow_dispatch:$$'
-	@sed -n '/^  pr-build:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | rg -Fxq "    if: github.event_name == 'pull_request'"
-	@sed -n '/^  pr-build:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build pull request image$$/,/^      - name: /p' | rg -q '^[[:space:]]+uses: docker/build-push-action@'
-	@sed -n '/^  pr-build:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build pull request image$$/,/^      - name: /p' | rg -Fxq '          platforms: linux/amd64'
-	@sed -n '/^  pr-build:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build pull request image$$/,/^      - name: /p' | rg -Fxq '          push: false'
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | rg -Fxq "    if: github.event_name == 'workflow_dispatch'"
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | rg -Fxq '      group: oidc-docker-publish'
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Checkout release$$/,/^      - name: /p' | rg -Fxq '          ref: refs/tags/$${{ inputs.tag }}'
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Select image tags$$/,/^      - name: /p' | rg -Fxq '          if [ "$$RELEASE_TAG" = "$$latest" ]; then'
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -q '^[[:space:]]+uses: docker/build-push-action@'
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -Fxq '          platforms: linux/amd64,linux/arm64'
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -Fxq '          push: true'
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -Fxq '            ghcr.io/lkshrk/frontman-oidc:$${{ inputs.tag }}'
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | sed -n '/^      - name: Build and push release image$$/,/^      - name: /p' | rg -Fxq "            \$${{ steps.release.outputs.latest == 'true' && 'ghcr.io/lkshrk/frontman-oidc:latest' || '' }}"
-	@sed -n '/^  publish:$$/,/^  [[:alnum:]_-][[:alnum:]_-]*:$$/p' .github/workflows/docker-publish.yml | rg -Fxq '          password: $${{ secrets.GITHUB_TOKEN }}'
-	@! rg -Pq 'secrets\.(?!GITHUB_TOKEN\b)' .github/workflows/docker-publish.yml
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fxq '          UPSTREAM_TAG: $${{ needs.verify.outputs.tag }}'
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fxq "          RETRY_RELEASE: \$${{ github.event_name == 'workflow_dispatch' }}"
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fxq '          if [[ ! "$$UPSTREAM_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$$ ]]; then'
-	@! sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q 'UPSTREAM_TAG='
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+gh release create "\$$UPSTREAM_TAG"'
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+--verify-tag'
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+gh release edit "\$$UPSTREAM_TAG"'
-	@test "$$(sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fc '[ "$$FORK_TAG_COMMIT" = "$$UPSTREAM_TAG_COMMIT" ]')" -eq 2
-	@test "$$(sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fc 'if [ "$$RETRY_RELEASE" = "true" ]; then')" -eq 2
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -Fxq '          trap publication_error ERR'
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+--repo "\$$GITHUB_REPOSITORY"'
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+--title "\$$UPSTREAM_TAG"'
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+gh workflow run docker-publish\.yml'
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+--ref "\$$UPSTREAM_TAG"'
-	@sed -n '/^      - name: Publish or report$$/,/^      - name: /p' .github/workflows/oidc-upstream-sync.yml | rg -q '^[[:space:]]+-f "tag=\$$UPSTREAM_TAG"'
 
 ## E2E_END
 
@@ -489,57 +445,10 @@ worktree-registry:
 	@ssh $(DEVPOD_USER)@$(DEVPOD_SERVER) "cat /etc/caddy/worktrees/registry.json 2>/dev/null | jq . || echo 'No worktrees registered'"
 
 # ============================================================================
-# Release
+# WordPress Tests
 # ============================================================================
-## REL_START
-.PHONY: publish publish-astro publish-vite publish-nextjs publish-react-statestore publish-swarm-ai release package-wordpress-plugin publish-wordpress-plugin-svn test-wordpress-core-tools
-
-publish: publish-astro publish-vite publish-nextjs publish-react-statestore ## Publish all npm packages (pass OTP=<code> for 2FA)
-
-publish-astro: ## Publish @frontman-ai/astro to npm (pass OTP=<code> for 2FA)
-	cd libs/frontman-astro && $(MAKE) publish OTP=$(OTP)
-
-publish-vite: ## Publish @frontman-ai/vite to npm (pass OTP=<code> for 2FA)
-	cd libs/frontman-vite && $(MAKE) publish OTP=$(OTP)
-
-publish-nextjs: ## Publish @frontman-ai/nextjs to npm (pass OTP=<code> for 2FA)
-	cd libs/frontman-nextjs && $(MAKE) publish OTP=$(OTP)
-
-publish-react-statestore: ## Publish @frontman-ai/react-statestore to npm (pass OTP=<code> for 2FA)
-	cd libs/react-statestore && $(MAKE) publish OTP=$(OTP)
-
-publish-swarm-ai: ## Publish swarm_ai to Hex (dry run by default, HEX_PUBLISH=1 for real)
-	cd apps/swarm_ai && $(MAKE) hex-publish HEX_PUBLISH=$(HEX_PUBLISH)
-
-release: ## Create a release PR from pending changesets
-	@printf "$(CYAN)Checking release prerequisites...$(RESET)\n"
-	@git fetch origin main --quiet
-	@LOCAL=$$(git rev-parse HEAD); \
-	REMOTE=$$(git rev-parse origin/main); \
-	if [ "$$LOCAL" != "$$REMOTE" ]; then \
-		printf "$(YELLOW)Error: local HEAD is not up to date with origin/main$(RESET)\n"; \
-		echo "Run 'git pull origin main' first"; \
-		exit 1; \
-	fi
-	@CHANGESETS=$$(find .changeset -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l); \
-	if [ "$$CHANGESETS" -eq 0 ]; then \
-		printf "$(YELLOW)Error: no pending changesets found$(RESET)\n"; \
-		echo "Add changesets with 'yarn changeset' before releasing"; \
-		exit 1; \
-	fi; \
-	printf "$(GREEN)Found $$CHANGESETS pending changeset(s)$(RESET)\n"
-	@printf "$(CYAN)Validating changesets...$(RESET)\n"
-	@yarn changeset status
-	@printf "$(YELLOW)Triggering release workflow...$(RESET)\n"
-	@gh workflow run release-pr.yml --ref main
-	@printf "$(GREEN)Release workflow triggered.$(RESET)\n"
-	@echo "Watch for the PR at: https://github.com/frontman-ai/frontman/pulls"
-
-package-wordpress-plugin: ## Build WordPress ZIP and WordPress.org bundle
-	@VERSION=$(VERSION) bash ./scripts/package-wordpress-plugin.sh
-
-publish-wordpress-plugin-svn: package-wordpress-plugin ## Publish WordPress.org bundle to SVN (requires WORDPRESS_ORG_* env vars)
-	@VERSION=$(VERSION) bash ./scripts/publish-wordpress-plugin-svn.sh
+## WP_TEST_START
+.PHONY: test-wordpress-core-tools test-wordpress-runtime
 
 test-wordpress-core-tools: ## Run PHP tests for WordPress tool implementations
 	@php -d auto_prepend_file=libs/frontman-wordpress/tests/ErrorHandler.php libs/frontman-wordpress/tests/NoFilesystemToolsTest.php
@@ -553,7 +462,7 @@ test-wordpress-core-tools: ## Run PHP tests for WordPress tool implementations
 test-wordpress-runtime: ## Run plugin integration tests in WordPress 7.0.2 containers
 	@bash scripts/test-wordpress-plugin-runtime.sh
 
-## REL_END
+## WP_TEST_END
 
 # ============================================================================
 # Utilities

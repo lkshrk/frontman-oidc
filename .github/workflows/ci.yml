@@ -488,7 +488,7 @@ jobs:
 
       - name: Compile test with warnings as errors
         working-directory: apps/swarm_ai
-        run: MIX_ENV=test mix compile --warnings-as-errors --all-warnings
+        run: env MIX_ENV=test mix compile --warnings-as-errors --all-warnings
 
       - name: Run tests
         working-directory: apps/swarm_ai
@@ -584,7 +584,7 @@ jobs:
         env:
           CLOAK_KEY: "dGVzdC1rZXktZm9yLWNpLXRoaXMtaXMtMzJieXRlc3M="
           MIX_TEST_DB_SUFFIX: "_run_${{ github.run_id }}"
-        run: MIX_ENV=test mix compile --warnings-as-errors --all-warnings
+        run: env MIX_ENV=test mix compile --warnings-as-errors --all-warnings
 
       - name: Run tests with coverage
         run: make -C apps/frontman_server test-coverage

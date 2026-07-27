@@ -268,18 +268,11 @@ Only bypass the reducer when explicitly requested for:
 - External library integrations that manage their own state
 - Performance-critical operations where the overhead is unacceptable
 
-## Changelog & Changesets
+## Fork Image Publishing
 
-**All notable changes must be tracked via changesets.**
-
-When making a change that should appear in the changelog, run `yarn changeset` and follow the prompts. This creates a markdown fragment in `.changeset/` describing the change.
-
-- A CI check (`changelog-check.yml`) blocks PRs that don't include a changeset or direct `CHANGELOG.md` update
-- Add the `skip-changelog` label to bypass for chore/docs-only PRs
-- Changesets accumulate silently on `main` — no auto-PR is created on merge
-- To release: run `make release` which triggers a GitHub workflow that runs `yarn changeset version`, creates a `release/vX.Y.Z` branch, and opens a PR for review
-- When the release PR is merged, `release-tag.yml` automatically creates a git tag and GitHub Release
-- The marketing site reads `/CHANGELOG.md` at build time for the `/changelog` page — keep entries in [Keep a Changelog](https://keepachangelog.com/) format: `## [version] - YYYY-MM-DD`
+- This fork has no application deployment workflow.
+- The daily upstream sync verifies the latest stable source release, creates the matching git tag and GitHub Release, and publishes `ghcr.io/lkshrk/frontman-oidc:<version>`.
+- Manually dispatch `oidc-upstream-sync.yml` with a tag to retry a missing release or image.
 
 ## Pull Requests
 
