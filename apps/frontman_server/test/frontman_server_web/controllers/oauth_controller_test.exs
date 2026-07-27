@@ -27,7 +27,7 @@ defmodule FrontmanServerWeb.OAuthControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Connection was cancelled."
     end
 
-    test "requires sudo mode", %{conn: conn, user: user} do
+    test "allows a callback after sudo mode expires", %{conn: conn, user: user} do
       old_auth_time = DateTime.add(DateTime.utc_now(), -30, :minute)
 
       conn =
@@ -35,10 +35,10 @@ defmodule FrontmanServerWeb.OAuthControllerTest do
         |> log_in_user(user, token_authenticated_at: old_auth_time)
         |> get(~p"/auth/link/callback", %{"error" => "access_denied"})
 
-      assert redirected_to(conn) == ~p"/users/log-in"
+      assert redirected_to(conn) == ~p"/users/settings"
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
-               "You must re-authenticate to access this page."
+               "Connection was cancelled."
     end
   end
 

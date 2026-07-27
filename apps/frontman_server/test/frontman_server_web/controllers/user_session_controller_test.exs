@@ -1,5 +1,5 @@
 defmodule FrontmanServerWeb.UserSessionControllerTest do
-  use FrontmanServerWeb.ConnCase, async: true
+  use FrontmanServerWeb.ConnCase, async: false
 
   import FrontmanServer.Test.Fixtures.Accounts
   alias FrontmanServer.Accounts
@@ -9,6 +9,28 @@ defmodule FrontmanServerWeb.UserSessionControllerTest do
   end
 
   describe "GET /users/log-in" do
+    test "renders the configured OIDC provider instead of WorkOS options", %{conn: conn} do
+      previous_config = Application.get_env(:frontman_server, FrontmanServer.Accounts.OIDC)
+
+      on_exit(fn ->
+        Application.put_env(:frontman_server, FrontmanServer.Accounts.OIDC, previous_config)
+      end)
+
+      Application.put_env(:frontman_server, FrontmanServer.Accounts.OIDC,
+        issuer: "https://issuer.example",
+        client_id: "client-id",
+        client_secret: "client-secret",
+        provider_name: "Authentik"
+      )
+
+      conn = get(conn, ~p"/users/log-in")
+      response = html_response(conn, 200)
+
+      assert response =~ "Login with Authentik"
+      refute response =~ "Login with GitHub"
+      refute response =~ "Login with Google"
+    end
+
     test "renders login page with OAuth options", %{conn: conn} do
       conn = get(conn, ~p"/users/log-in")
       response = html_response(conn, 200)
@@ -16,6 +38,8 @@ defmodule FrontmanServerWeb.UserSessionControllerTest do
       # OAuth-only login now - shows GitHub and Google options
       assert response =~ "Login with GitHub"
       assert response =~ "Login with Google"
+      assert response =~ ~s(href="/auth/github")
+      assert response =~ ~s(href="/auth/google")
     end
 
     test "stores canonical signup framework in session", %{conn: conn} do
@@ -105,6 +129,19 @@ defmodule FrontmanServerWeb.UserSessionControllerTest do
         })
 
       assert get_session(conn, :user_token)
+      assert redirected_to(conn) == ~p"/"
+    end
+
+    test "blocks direct login posts from an authenticated user", %{conn: conn, user: user} do
+      user = set_password(user)
+
+      conn =
+        conn
+        |> log_in_user(user)
+        |> post(~p"/users/log-in", %{
+          "user" => %{"email" => user.email, "password" => valid_user_password()}
+        })
+
       assert redirected_to(conn) == ~p"/"
     end
 

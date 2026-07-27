@@ -3,6 +3,22 @@ import Config
 # Mark environment for runtime checks
 config :frontman_server, env: :e2e
 
+case System.get_env("ANTHROPIC_BASE_URL") do
+  anthropic_base_url when is_binary(anthropic_base_url) and anthropic_base_url != "" ->
+    config :frontman_server, :providers,
+      anthropic: %{
+        display_name: "Anthropic (Claude Pro/Max)",
+        max_image_dimension: 7680,
+        llm_db_provider: [],
+        models: [{"Claude Haiku 4.5", "claude-haiku-4-5-20251001", :packaged}]
+      }
+
+    config :req_llm, :anthropic, base_url: anthropic_base_url
+
+  _missing ->
+    :ok
+end
+
 # Configure your database
 config :frontman_server, FrontmanServer.Repo,
   username: "postgres",
@@ -14,13 +30,21 @@ config :frontman_server, FrontmanServer.Repo,
   pool_size: 10
 
 config :frontman_server, FrontmanServerWeb.Endpoint,
-  url: [host: "localhost", port: 4002, scheme: "https"],
+  url: [
+    host: "localhost",
+    port: String.to_integer(System.get_env("FRONTMAN_E2E_PORT") || "4002"),
+    scheme: "https"
+  ],
   https: [
     ip: {127, 0, 0, 1},
-    port: 4002,
+    port: String.to_integer(System.get_env("FRONTMAN_E2E_PORT") || "4002"),
     cipher_suite: :strong,
-    keyfile: Path.expand("../../../.certs/frontman.local-key.pem", __DIR__),
-    certfile: Path.expand("../../../.certs/frontman.local.pem", __DIR__)
+    keyfile:
+      System.get_env("FRONTMAN_E2E_KEYFILE") ||
+        Path.expand("../../../.certs/frontman.local-key.pem", __DIR__),
+    certfile:
+      System.get_env("FRONTMAN_E2E_CERTFILE") ||
+        Path.expand("../../../.certs/frontman.local.pem", __DIR__)
   ],
   check_origin: false,
   code_reloader: false,

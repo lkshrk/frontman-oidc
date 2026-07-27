@@ -28,6 +28,13 @@ Boolean env vars use one canonical parser in both Elixir and TS setup code.
 
 Copy `test/e2e/.env.example` to `test/e2e/.env` and populate:
 
+- `ANTHROPIC_AUTH_TOKEN`
+- `ANTHROPIC_BASE_URL`
+
+The E2E environment uses `anthropic:claude-haiku-4-5-20251001`.
+`ANTHROPIC_BASE_URL` may point to an Anthropic-compatible proxy such as LiteLLM.
+The upstream ChatGPT OAuth variables remain supported as a fallback:
+
 - `E2E_OPENAI_ACCESS_TOKEN`
 - `E2E_OPENAI_REFRESH_TOKEN`
 - `E2E_OPENAI_ACCOUNT_ID`

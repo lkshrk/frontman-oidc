@@ -16,7 +16,7 @@ defmodule FrontmanServer.Accounts.UserIdentity do
   import Ecto.Changeset
   import Ecto.Query
 
-  @providers ~w(github google)
+  @providers ~w(github google oidc)
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id

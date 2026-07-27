@@ -20,6 +20,7 @@ defmodule FrontmanServer do
     {Providers, []},
     {Tasks, []},
     {Frameworks, []},
+    OIDCLogin,
     BrandTokens,
     Repo,
     Vault,

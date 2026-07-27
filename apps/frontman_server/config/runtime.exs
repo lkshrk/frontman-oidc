@@ -57,6 +57,13 @@ config :workos, WorkOS.Client,
   api_key: env!("WORKOS_API_KEY", :string, nil),
   client_id: env!("WORKOS_CLIENT_ID", :string, nil)
 
+config :frontman_server, FrontmanServer.Accounts.OIDC,
+  issuer: env!("OIDC_ISSUER", :string, nil),
+  client_id: env!("OIDC_CLIENT_ID", :string, nil),
+  client_secret: env!("OIDC_CLIENT_SECRET", :string, nil),
+  provider_name: env!("OIDC_PROVIDER_NAME", :string, "Single Sign-On"),
+  group_claim: env!("OIDC_GROUP_CLAIM", :string, "groups")
+
 # Dev/Test/E2E: Allow DB_HOST override for container development (e.g., DevPod)
 # The docker bridge gateway IP (172.17.0.1) is used to connect from container to host PostgreSQL
 if config_env() in [:dev, :test, :e2e] do

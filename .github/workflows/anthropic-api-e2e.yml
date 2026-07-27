@@ -1,0 +1,187 @@
+name: Anthropic API E2E
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/anthropic-api-e2e.yml"
+      - "adapters/**"
+      - "apps/frontman_server/**"
+      - "apps/swarm_ai/**"
+      - "libs/client/src/**"
+      - "libs/frontman-client/src/**"
+      - "mise.toml"
+      - "test/e2e/**"
+      - "yarn.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anthropic-api-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  anthropic-api-e2e:
+    name: Anthropic API E2E
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_NAME: frontman_server_e2e_${{ github.run_id }}
+      ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN || secrets.OPENAI_API_KEY }}
+      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL || vars.ANTHROPIC_BASE_URL || secrets.OPENAI_BASE_URL || vars.OPENAI_BASE_URL }}
+      MIX_ENV: e2e
+      PHX_SERVER: "true"
+
+    steps:
+      - name: Require Anthropic-compatible credentials
+        run: |
+          test -n "$ANTHROPIC_AUTH_TOKEN" || {
+            echo "::error::ANTHROPIC_AUTH_TOKEN or OPENAI_API_KEY secret is required"
+            exit 1
+          }
+          case "$ANTHROPIC_BASE_URL" in
+            https://*) ;;
+            *)
+              echo "::error::ANTHROPIC_BASE_URL or OPENAI_BASE_URL must be an HTTPS secret or variable"
+              exit 1
+              ;;
+          esac
+
+      - name: Resolve Anthropic-compatible base URL
+        shell: bash
+        run: |
+          base_url="${ANTHROPIC_BASE_URL%/}"
+          case "$base_url" in
+            */chat/completions) base_url="${base_url%/chat/completions}" ;;
+            */responses) base_url="${base_url%/responses}" ;;
+            */v1/messages) base_url="${base_url%/v1/messages}" ;;
+          esac
+          case "$base_url" in
+            */v1) base_url="${base_url%/v1}" ;;
+          esac
+          base_url="${base_url%/}"
+
+          candidates=("$base_url")
+          case "$base_url" in
+            */openai) candidates+=("${base_url%/openai}/anthropic") ;;
+            */anthropic) ;;
+            *) candidates+=("$base_url/anthropic") ;;
+          esac
+
+          for index in "${!candidates[@]}"; do
+            candidate="${candidates[$index]}"
+            status="$(
+              curl \
+                --silent \
+                --output /dev/null \
+                --write-out '%{http_code}' \
+                --connect-timeout 10 \
+                --max-time 20 \
+                --header "Authorization: Bearer $ANTHROPIC_AUTH_TOKEN" \
+                --header "anthropic-version: 2023-06-01" \
+                --header "Content-Type: application/json" \
+                --data '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}' \
+                "$candidate/v1/messages"
+            )" || status="000"
+            echo "Anthropic route candidate $((index + 1)) returned HTTP $status"
+
+            case "$status" in
+              2??)
+                echo "::add-mask::$candidate"
+                echo "ANTHROPIC_BASE_URL=$candidate" >> "$GITHUB_ENV"
+                exit 0
+                ;;
+              *) ;;
+            esac
+          done
+
+          echo "::error::Configured base URL/token has no working LiteLLM Anthropic endpoint"
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          clean: false
+          persist-credentials: false
+
+      - name: Generate encryption key
+        run: printf 'CLOAK_KEY=%s\n' "$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libssl-dev libncurses5-dev libnss3-tools postgresql-client
+
+      - name: Setup toolchain
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install: true
+          cache: true
+
+      - name: Enable Corepack
+        run: corepack enable && corepack install
+
+      - name: Install dependencies
+        run: |
+          make setup-elixir-tools
+          make install
+          make -C apps/frontman_server install
+
+      - name: Compile server
+        working-directory: apps/frontman_server
+        run: mix compile --warnings-as-errors --all-warnings
+
+      - name: Build ReScript and adapters
+        run: |
+          make build
+          yarn workspace @frontman-ai/nextjs build
+          yarn workspace @frontman-ai/vite build
+          yarn workspace @frontman-ai/astro build
+
+      - name: Generate test certificates
+        run: |
+          mkcert -install 2>/dev/null || true
+          mkdir -p .certs
+          mkcert -key-file .certs/frontman.local-key.pem \
+            -cert-file .certs/frontman.local.pem \
+            frontman.local localhost 127.0.0.1 ::1
+
+      - name: Install Chromium
+        run: make e2e-oidc-install-browser
+
+      - name: Run browser suite through Anthropic API
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: "0"
+        run: |
+          install -m 600 /dev/null test/e2e/.env
+          make e2e
+
+      - name: Cleanup
+        if: always()
+        run: |
+          lsof -ti:4002 2>/dev/null | xargs kill -9 2>/dev/null || true
+          lsof -ti:5173 2>/dev/null | xargs kill -9 2>/dev/null || true
+          lsof -ti:3010 2>/dev/null | xargs kill -9 2>/dev/null || true
+          lsof -ti:3011 2>/dev/null | xargs kill -9 2>/dev/null || true
+          lsof -ti:3012 2>/dev/null | xargs kill -9 2>/dev/null || true
+          lsof -ti:3013 2>/dev/null | xargs kill -9 2>/dev/null || true
+          bash scripts/ci/postgres-test-db-cleanup.sh current-e2e || true
+          git checkout -- test/e2e/fixtures/ 2>/dev/null || true
+          git clean -fd -- test/e2e/fixtures/ 2>/dev/null || true

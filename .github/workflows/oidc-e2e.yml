@@ -1,0 +1,78 @@
+name: OIDC E2E
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/oidc-e2e.yml"
+      - "Makefile"
+      - "apps/frontman_server/**"
+      - "test/e2e/oidc/**"
+      - "test/e2e/package.json"
+      - "yarn.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oidc-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  oidc-e2e:
+    name: OIDC E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_NAME: frontman_server_e2e_${{ github.run_id }}
+      YARN_ENABLE_HARDENED_MODE: "0"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Generate encryption key
+        run: printf 'CLOAK_KEY=%s\n' "$(openssl rand -base64 32)" >> "$GITHUB_ENV"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libssl-dev libncurses5-dev postgresql-client
+
+      - name: Setup toolchain
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          install: true
+          cache: true
+
+      - name: Enable Corepack
+        run: corepack enable && corepack install
+
+      - name: Install dependencies
+        run: |
+          make setup-elixir-tools
+          make install
+          make -C apps/frontman_server install
+
+      - name: Install Chromium
+        run: make e2e-oidc-install-browser
+
+      - name: Run OIDC E2E
+        run: make e2e-oidc

@@ -40,6 +40,11 @@ defmodule FrontmanServer.Organizations.Organization do
     from o in query, where: o.slug == ^slug
   end
 
+  @spec with_slugs(Ecto.Queryable.t(), [String.t()]) :: Ecto.Query.t()
+  def with_slugs(query, slugs) do
+    from o in query, where: o.slug in ^slugs
+  end
+
   def ordered_by_name(query \\ __MODULE__) do
     from o in query, order_by: [asc: o.name]
   end

@@ -20,6 +20,7 @@ defmodule FrontmanServer.Organizations.Membership do
   @foreign_key_type :binary_id
   schema "memberships" do
     field :role, Ecto.Enum, values: [:owner, :member]
+    field :provisioner, Ecto.Enum, values: [:manual, :oidc], default: :manual
 
     belongs_to :user, User
     belongs_to :organization, Organization
@@ -41,6 +42,20 @@ defmodule FrontmanServer.Organizations.Membership do
     from m in query, where: m.role == ^role
   end
 
+  @spec stale_oidc_memberships_for_user(binary(), [binary()]) :: Ecto.Query.t()
+  def stale_oidc_memberships_for_user(user_id, organization_ids) do
+    query =
+      from m in __MODULE__,
+        where: m.user_id == ^user_id,
+        where: m.provisioner == :oidc,
+        where: m.role == :member
+
+    case organization_ids do
+      [] -> query
+      _ -> from m in query, where: m.organization_id not in ^organization_ids
+    end
+  end
+
   def with_user(query \\ __MODULE__) do
     from m in query, preload: [:user]
   end
@@ -52,8 +67,8 @@ defmodule FrontmanServer.Organizations.Membership do
   @doc false
   def changeset(membership, attrs) do
     membership
-    |> cast(attrs, [:role, :user_id, :organization_id])
-    |> validate_required([:role, :user_id, :organization_id])
+    |> cast(attrs, [:role, :provisioner, :user_id, :organization_id])
+    |> validate_required([:role, :provisioner, :user_id, :organization_id])
     |> unique_constraint([:user_id, :organization_id])
     |> foreign_key_constraint(:user_id)
     |> foreign_key_constraint(:organization_id)

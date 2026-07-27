@@ -30,12 +30,20 @@ COPY libs/frontman-client/package.json libs/frontman-client/
 COPY libs/frontman-protocol/package.json libs/frontman-protocol/
 COPY libs/frontman-core/package.json libs/frontman-core/
 COPY libs/frontman-astro/package.json libs/frontman-astro/
+COPY libs/frontman-astro-browser/package.json libs/frontman-astro-browser/
 COPY libs/frontman-nextjs/package.json libs/frontman-nextjs/
+COPY libs/frontman-wordpress/package.json libs/frontman-wordpress/
 COPY libs/react-statestore/package.json libs/react-statestore/
 COPY libs/logs/package.json libs/logs/
-COPY libs/vite-plugin/package.json libs/vite-plugin/
+COPY libs/frontman-vite/package.json libs/frontman-vite/
 COPY apps/marketing/package.json apps/marketing/
 COPY test/sites/blog-starter/package.json test/sites/blog-starter/
+COPY test/e2e/package.json test/e2e/
+COPY test/e2e/fixtures/nextjs/package.json test/e2e/fixtures/nextjs/
+COPY test/e2e/fixtures/astro/package.json test/e2e/fixtures/astro/
+COPY test/e2e/fixtures/vite/package.json test/e2e/fixtures/vite/
+COPY test/e2e/fixtures/vue-vite/package.json test/e2e/fixtures/vue-vite/
+COPY test/manual/vite-dashboard/package.json test/manual/vite-dashboard/
 
 RUN yarn install --immutable
 
@@ -47,7 +55,10 @@ RUN yarn rescript clean && yarn rescript build
 
 # ---------- Elixir dependencies ----------
 ENV MIX_ENV="prod"
+# OTP's dual-mapped JIT memory is incompatible with QEMU user-mode emulation.
+ENV ERL_FLAGS="+JMsingle true"
 
+COPY apps/swarm_ai/ apps/swarm_ai/
 COPY apps/frontman_server/mix.exs apps/frontman_server/mix.lock apps/frontman_server/
 
 WORKDIR /app/apps/frontman_server
@@ -59,7 +70,8 @@ RUN mix local.hex --force && \
 # Copy compile-time config before compiling deps to ensure config
 # changes trigger recompilation
 RUN mkdir -p config
-COPY apps/frontman_server/config/config.exs apps/frontman_server/config/${MIX_ENV}.exs config/
+COPY apps/frontman_server/config/config.exs apps/frontman_server/config/providers.exs \
+    apps/frontman_server/config/${MIX_ENV}.exs config/
 RUN mix deps.compile
 
 RUN mix tailwind.install --if-missing && mix esbuild.install --if-missing

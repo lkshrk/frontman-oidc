@@ -8,12 +8,11 @@ defmodule FrontmanServerWeb.Endpoint do
   use Sentry.PlugCapture
   use Phoenix.Endpoint, otp_app: :frontman_server
 
-  # The session will be stored in the cookie and signed,
-  # this means its contents can be read but not tampered with.
-  # Set :encryption_salt if you would also like to encrypt it.
+  # OIDC verifier and nonce values require encrypted client-side sessions.
   @session_options [
     store: :cookie,
     key: "_frontman_server_key",
+    encryption_salt: "LuWf9zcP",
     signing_salt: "4+DQeuxI",
     same_site: "None",
     secure: true

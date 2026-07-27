@@ -97,6 +97,7 @@ defmodule FrontmanServer.MixProject do
       {:sentry, "~> 13.0"},
       # WorkOS for OAuth (GitHub, Google)
       {:workos, "~> 1.1"},
+      {:oidcc, "~> 3.7"},
       # ==================DEV/Test=========================
       {:phoenix_live_reload, "~> 1.2", only: :dev},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},

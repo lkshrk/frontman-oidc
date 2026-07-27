@@ -10,8 +10,10 @@ defmodule FrontmanServer.Application do
   @moduledoc false
 
   use Boundary, top_level?: true, deps: [FrontmanServer, FrontmanServerWeb]
+
   use Application
 
+  alias FrontmanServer.Accounts.OIDC
   alias FrontmanServer.Observability.ConsoleHandler
 
   @sentry_metadata [
@@ -59,11 +61,14 @@ defmodule FrontmanServer.Application do
       {SwarmAi, name: FrontmanServer.AgentRuntime},
       # Registry for MCP tool call result routing (separate from agent execution tracking)
       {Registry, keys: :unique, name: FrontmanServer.ToolCallRegistry},
+      OIDC.children(),
       # Oban background job processing (email delivery, contact sync, etc.)
       {Oban, Application.fetch_env!(:frontman_server, Oban)},
       # Start to serve requests, typically the last entry
       FrontmanServerWeb.Endpoint
     ]
+
+    children = List.flatten(children)
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

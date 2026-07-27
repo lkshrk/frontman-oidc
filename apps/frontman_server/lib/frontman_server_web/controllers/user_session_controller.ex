@@ -8,6 +8,7 @@ defmodule FrontmanServerWeb.UserSessionController do
   use FrontmanServerWeb, :controller
 
   alias FrontmanServer.Accounts
+  alias FrontmanServer.Accounts.OIDC
   alias FrontmanServer.Frameworks
   alias FrontmanServerWeb.UserAuth
 
@@ -22,7 +23,7 @@ defmodule FrontmanServerWeb.UserSessionController do
       |> maybe_put_user_return_to(params["return_to"])
       |> maybe_put_signup_framework(params["framework"])
 
-    render(conn, :new, form: form)
+    render_new(conn, form)
   end
 
   # magic link login
@@ -42,7 +43,7 @@ defmodule FrontmanServerWeb.UserSessionController do
       {:error, :not_found} ->
         conn
         |> put_flash(:error, "The link is invalid or it has expired.")
-        |> render(:new, form: Phoenix.Component.to_form(%{}, as: "user"))
+        |> render_new(Phoenix.Component.to_form(%{}, as: "user"))
     end
   end
 
@@ -58,7 +59,7 @@ defmodule FrontmanServerWeb.UserSessionController do
       # In order to prevent user enumeration attacks, don't disclose whether the email is registered.
       conn
       |> put_flash(:error, "Invalid email or password")
-      |> render(:new, form: form)
+      |> render_new(form)
     end
   end
 
@@ -126,4 +127,8 @@ defmodule FrontmanServerWeb.UserSessionController do
   end
 
   defp maybe_put_signup_framework(conn, _), do: delete_session(conn, :signup_framework)
+
+  defp render_new(conn, form) do
+    render(conn, :new, form: form, oidc_provider_name: OIDC.provider_name())
+  end
 end

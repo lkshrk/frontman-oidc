@@ -98,7 +98,7 @@ defmodule FrontmanServer.Accounts.WorkOS do
   defp authenticate_with_code_internal(code, signup_framework) do
     with {:ok, auth_response} <- authenticate_with_code_raw(code),
          {:ok, profile} <- extract_profile(auth_response) do
-      find_or_create_user_from_oauth(profile, signup_framework)
+      upsert_oauth_profile(profile, signup_framework)
     end
   end
 
@@ -168,7 +168,7 @@ defmodule FrontmanServer.Accounts.WorkOS do
     with {:ok, response_body} <- post_authenticate_request(body, "email verify"),
          {:ok, auth_response} <- parse_auth_response(response_body),
          {:ok, profile} <- extract_profile(auth_response) do
-      find_or_create_user_from_oauth(profile, signup_framework)
+      upsert_oauth_profile(profile, signup_framework)
     end
   end
 
@@ -219,6 +219,41 @@ defmodule FrontmanServer.Accounts.WorkOS do
     UserIdentity
     |> UserIdentity.for_user_and_provider(user.id, provider)
     |> Repo.one()
+  end
+
+  @type oauth_profile :: %{
+          required(:provider) => String.t(),
+          required(:provider_id) => String.t(),
+          required(:provider_email) => String.t(),
+          required(:provider_name) => String.t(),
+          required(:provider_avatar_url) => String.t() | nil
+        }
+
+  @spec upsert_oauth_profile(oauth_profile(), String.t() | nil) ::
+          {:ok, User.t()} | {:error, term()}
+  def upsert_oauth_profile(profile, nil) when is_map(profile) do
+    find_or_create_user_from_oauth(profile, nil)
+  end
+
+  def upsert_oauth_profile(profile, signup_framework)
+      when is_map(profile) and is_binary(signup_framework) do
+    find_or_create_user_from_oauth(profile, signup_framework)
+  end
+
+  @spec upsert_oauth_profile_multi(oauth_profile(), String.t() | nil) :: Multi.t()
+  def upsert_oauth_profile_multi(profile, nil) when is_map(profile) do
+    build_oauth_profile_multi(profile, nil)
+  end
+
+  def upsert_oauth_profile_multi(profile, signup_framework)
+      when is_map(profile) and is_binary(signup_framework) do
+    build_oauth_profile_multi(profile, signup_framework)
+  end
+
+  @spec link_oauth_profile(User.t(), oauth_profile()) ::
+          {:ok, UserIdentity.t()} | {:error, term()}
+  def link_oauth_profile(%User{} = user, profile) when is_map(profile) do
+    create_identity(user, profile)
   end
 
   # Private functions
@@ -273,15 +308,17 @@ defmodule FrontmanServer.Accounts.WorkOS do
   end
 
   defp find_or_create_user_from_oauth(profile, signup_framework) do
-    identity = get_identity_by_provider_id(profile.provider, profile.provider_id)
-    existing_user = get_user_by_email(profile.provider_email)
-
-    multi = build_oauth_multi(identity, existing_user, profile, signup_framework)
-
-    case Repo.transaction(multi) do
+    case profile |> upsert_oauth_profile_multi(signup_framework) |> Repo.transaction() do
       {:ok, %{user: user}} -> {:ok, user}
       {:error, _step, changeset, _changes} -> {:error, changeset}
     end
+  end
+
+  defp build_oauth_profile_multi(profile, signup_framework) do
+    identity = get_identity_by_provider_id(profile.provider, profile.provider_id)
+    existing_user = get_user_by_email(profile.provider_email)
+
+    build_oauth_multi(identity, existing_user, profile, signup_framework)
   end
 
   # Returning user with existing identity — touch timestamps, no welcome email.

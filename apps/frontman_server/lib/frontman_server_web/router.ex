@@ -58,6 +58,8 @@ defmodule FrontmanServerWeb.Router do
   scope "/auth", FrontmanServerWeb do
     pipe_through([:browser, :redirect_if_user_is_authenticated])
 
+    get("/oidc", OIDCController, :request)
+    get("/oidc/callback", OIDCController, :callback)
     get("/callback", OAuthController, :callback)
     get("/verify-email", OAuthController, :verify_email_form)
     post("/verify-email", OAuthController, :verify_email)
@@ -68,6 +70,9 @@ defmodule FrontmanServerWeb.Router do
   scope "/auth", FrontmanServerWeb do
     pipe_through([:browser, :require_authenticated_user])
 
+    get("/oidc/link", OIDCController, :link_request)
+    get("/oidc/link/callback", OIDCController, :link_callback)
+    delete("/oidc/unlink", OIDCController, :unlink)
     get("/link/callback", OAuthController, :link_callback)
     get("/:provider/link", OAuthController, :link_request)
     delete("/:provider/unlink", OAuthController, :unlink)

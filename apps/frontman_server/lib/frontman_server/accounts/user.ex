@@ -11,6 +11,7 @@ defmodule FrontmanServer.Accounts.User do
 
   use Ecto.Schema
   import Ecto.Changeset
+  import Ecto.Query
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -66,6 +67,11 @@ defmodule FrontmanServer.Accounts.User do
     |> unique_constraint(:email)
     |> put_change(:confirmed_at, now)
     |> put_change(:last_signed_in_at, now)
+  end
+
+  @spec locked_for_update(Ecto.Queryable.t()) :: Ecto.Query.t()
+  def locked_for_update(query) do
+    from user in query, lock: "FOR UPDATE"
   end
 
   defp validate_registration_email(changeset, opts) do

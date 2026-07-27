@@ -143,6 +143,41 @@ Frontman uses BYOK (bring your own key). Connect any LLM provider:
 
 You pay your LLM provider directly at their standard rates. Self-hosting remains free under the project's open-source licenses; hosted Frontman service plans are moving to paid subscriptions.
 
+## Authentication
+
+### Authentik and generic OIDC
+
+OIDC login is enabled when all three required variables are set:
+
+```dotenv
+OIDC_ISSUER=https://auth.example.com/application/o/frontman/
+OIDC_CLIENT_ID=frontman
+OIDC_CLIENT_SECRET=replace-me
+```
+
+For Authentik, use the application-specific issuer ending in
+`/application/o/<application-slug>/`. Register these redirect URIs for your
+Frontman origin:
+
+```text
+https://frontman.example.com/auth/oidc/callback
+https://frontman.example.com/auth/oidc/link/callback
+```
+
+The provider must supply `iss`, `sub`, `email`, and `email_verified: true`
+claims. Frontman requests the `openid email profile` scopes. It reads groups
+from the `groups` string-array claim by default; set `OIDC_GROUP_CLAIM` to use
+another claim and `OIDC_PROVIDER_NAME` to change the login button label.
+
+Each group value must exactly match an existing Frontman organization slug.
+OIDC does not create organizations or grant owner access. It adds and removes
+only OIDC-managed member memberships; manual memberships and owner roles are
+preserved.
+
+WorkOS remains the fallback: leave the OIDC variables unset and configure
+`WORKOS_API_KEY` and `WORKOS_CLIENT_ID` to keep the existing GitHub and Google
+login buttons.
+
 ## Self-Hosting and License
 
 Frontman is open source and can be self-hosted from source. Official hosted and self-hosting packaging is still evolving.
